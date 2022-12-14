@@ -4,3 +4,4 @@ main/client.crt
 main/client.key
 main/build
 .cache/
+esp-idf-ssd1306/

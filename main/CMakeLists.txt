@@ -1,5 +1,4 @@
-idf_component_register(SRCS main.c wifi.c http.c
-                    EMBED_TXTFILES client.crt client.key index.html
+idf_component_register(SRCS main.c
                     INCLUDE_DIRS "")
 
 target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")
