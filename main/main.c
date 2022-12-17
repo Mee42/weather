@@ -37,10 +37,26 @@
 
 #define tag "SSD1306"
 
-
+bool getButton() {
+	return gpio_get_level(GPIO_NUM_18);
+}
 
 void app_main(void)
 {
+
+	gpio_config_t io_conf = {};
+
+    //interrupt of rising edge
+    //bit mask of the pins, use GPIO4/5 here
+    io_conf.pin_bit_mask = 1 << GPIO_NUM_18;
+    //set as input mode
+    io_conf.mode = GPIO_MODE_INPUT;
+    //enable pull-up mode
+    io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
+    gpio_config(&io_conf);
+
+
+
 	SSD1306_t dev;
 	int center, top, bottom;
 	char lineChar[20];
@@ -59,8 +75,14 @@ void app_main(void)
   	ssd1306_display_text_x3(&dev, 1, "IT'S", 5, true);
   	ssd1306_display_text_x3(&dev, 4, " COLD", 5, true);
 
-  	vTaskDelay(30000000000 / portTICK_PERIOD_MS);
-
+	while(true) {
+  		vTaskDelay(300 / portTICK_PERIOD_MS);
+		if(getButton()) {
+  			ssd1306_display_text_x3(&dev, 1, "PRESSED", 5, true);
+		} else {
+			ssd1306_display_text_x3(&dev, 1, "RELES.", 5, true); 
+		}
+	}
 	top = 2;
 	center = 3;
 	bottom = 8;
