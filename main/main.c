@@ -41,17 +41,65 @@ bool getButton() {
 	return gpio_get_level(GPIO_NUM_18);
 }
 
+typedef struct {
+	char day[2];
+	int high;
+	int low;
+} day_t;
+
+void display_str_x2(SSD1306_t*,int,int,char*,size_t,bool);
+
+void render_menu(SSD1306_t *dev, day_t *info) {
+	//ssd1306_clear_screen(dev, false);
+//	ssd1306_display_text_x3(dev, 0, "  XXX", 5, false);
+	ssd1306_display_text(dev, 0, "      ", 6, true);
+	ssd1306_display_text_x3(dev, 1, info->day, 2, true);
+	char buf[50];
+	sprintf(buf, "L:%2d", info->low);
+	display_str_x2(dev, 7 * 8, 0, buf, strlen(buf), false); 
+	sprintf(buf, "H:%2d", info->high);
+	display_str_x2(dev, 7 * 8, 2, buf, strlen(buf), false); 
+	display_str_x2(dev, 0, 4, "01234567", 8, false);
+	display_str_x2(dev, 0, 6, "01234567", 8, false);
+}
+//    ----------------
+//  | bbbbbb YYYYYYYY
+//  | XXXXXX YYYYYYYY
+//  | XXXXXX ZZZZZZZZ
+//  | XXXXXX ZZZZZZZZ
+//  | xxyyxxyyxxyyxxyy
+//  | xxyyxxyyxxyyxxyy
+//  |
+//  |
+
+void display_str_x2(SSD1306_t *dev, int seg, int pageOffset,
+		            char* str, size_t len, bool inverted) {
+	uint8_t buf[16]; // we're writing 16 pages
+	for(int str_i = 0; str_i < len; str_i++){
+		uint8_t const * const inCols = font8x8_basic_tr[(uint8_t)(str[str_i])];
+		for(int page = 0; page <= 1; page++) {
+			for(int x = 0; x < 16; x++) {
+				// x is the column index
+				buf[x] = 0;
+				for(int y = 0; y < 8; y++){
+					// y is the position of the bit that we are writing
+					int isOn = 0 != (inCols[x/2] & (1 << (y/2 + page * 4)));
+					if(isOn) buf[x] |= 1 << y;
+				}
+			}
+			i2c_display_image(dev, page + pageOffset, seg, buf, 16);
+		}
+		seg += 16;
+	}
+}
+
 void app_main(void)
 {
 
+	// this is the top button
 	gpio_config_t io_conf = {};
-
-    //interrupt of rising edge
-    //bit mask of the pins, use GPIO4/5 here
     io_conf.pin_bit_mask = 1 << GPIO_NUM_18;
-    //set as input mode
     io_conf.mode = GPIO_MODE_INPUT;
-    //enable pull-up mode
     io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
     gpio_config(&io_conf);
 
@@ -70,18 +118,63 @@ void app_main(void)
 	ESP_LOGI(tag, "Panel is 128x64");
 	ssd1306_init(&dev, 128, 64);
 
-	ssd1306_clear_screen(&dev, true);
-	ssd1306_contrast(&dev, 0xff);
-  	ssd1306_display_text_x3(&dev, 1, "IT'S", 5, true);
-  	ssd1306_display_text_x3(&dev, 4, " COLD", 5, true);
+	ssd1306_clear_screen(&dev, false);
+	//ssd1306_contrast(&dev, 0xff);
+  	//ssd1306_display_text_x3(&dev, 1, "IT'S", 5, true);
+  	//ssd1306_display_text_x3(&dev, 4, " COLD", 5, true);
 
+//	display_str_x2(&dev, 16, "ABC", 3, false);
+//	while(true);
+
+	day_t days[5] = {
+		{
+			.day = { 'T', 'u' },
+			.high = 35,
+			.low = 22
+		},
+		{
+			.day = {'W', 'e'},
+			.high = 58,
+			.low = 34
+		},
+		{
+			.day = { 'T', 'h' },
+			.high = 92,
+			.low = 4
+		},
+		{
+			.day = {'F', 'r'},
+			.high = 13,
+			.low = -4
+		},
+		{
+			.day = {'S', 'a'},
+			.high = 99,
+			.low = 77
+		},
+	};
+	int i = 0;
 	while(true) {
-  		vTaskDelay(300 / portTICK_PERIOD_MS);
-		if(getButton()) {
-  			ssd1306_display_text_x3(&dev, 1, "PRESSED", 5, true);
-		} else {
-			ssd1306_display_text_x3(&dev, 1, "RELES.", 5, true); 
-		}
+		render_menu(&dev, &days[i++ % 5]);
+		while(!getButton());
+		while(getButton());
+		while(!getButton());
+		while(getButton());
+	}
+
+	while(true) vTaskDelay(30000 / portTICK_PERIOD_MS);
+		
+	char buf[20];
+	while(true) {
+  		//vTaskDelay(3 / portTICK_PERIOD_MS);
+//		if(getButton()) {
+//  			ssd1306_display_text_x3(&dev, 1, "PRESSED", 5, true);
+//		} else {
+//			ssd1306_display_text_x3(&dev, 1, "RELES.", 5, true); 
+//		}
+		while(getButton());
+		sprintf(buf, "%i", ++i);
+  		ssd1306_display_text(&dev, 1, buf, strlen(buf), true);
 	}
 	top = 2;
 	center = 3;
@@ -191,5 +284,4 @@ void app_main(void)
 	// Restart module
 	esp_restart();
 }
-
 
