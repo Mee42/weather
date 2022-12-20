@@ -22,6 +22,9 @@ void init_wifi() {
 
 #include "../secrets.h"
 
+
+#define TAG "wifi.c"
+
 /* The examples use WiFi configuration that you can set via project configuration menu
    If you'd rather not, just change the below entries to strings with
    the config you want - ie #define EXAMPLE_WIFI_SSID "mywifissid"
@@ -41,7 +44,6 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static const char *TAG = "wifi station";
 
 static int s_retry_num = 0;
 
