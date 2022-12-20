@@ -5,3 +5,5 @@ main/client.key
 main/build
 .cache/
 esp-idf-ssd1306/
+
+secrets.h

@@ -24,7 +24,7 @@
 #include <inttypes.h>
 
 #include "main.h"
-
+#include "wifi.h"
 
 
 #include "freertos/FreeRTOS.h"
@@ -49,7 +49,8 @@ typedef struct {
 
 void display_str_x2(SSD1306_t*,int,int,char*,size_t,bool);
 
-void render_menu(SSD1306_t *dev, day_t *info) {
+void render_forcast_menu(SSD1306_t *dev, day_t *info) {
+	ESP_LOGI("main:render_forcast_menu", "swapped day");
 	//ssd1306_clear_screen(dev, false);
 //	ssd1306_display_text_x3(dev, 0, "  XXX", 5, false);
 	ssd1306_display_text(dev, 0, "      ", 6, true);
@@ -93,9 +94,20 @@ void display_str_x2(SSD1306_t *dev, int seg, int pageOffset,
 	}
 }
 
+
+
+void init_nvs_flash() {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+}
+
 void app_main(void)
 {
-
+	ESP_LOGI("app_main","setting top button gpio as input");
 	// this is the top button
 	gpio_config_t io_conf = {};
     io_conf.pin_bit_mask = 1 << GPIO_NUM_18;
@@ -103,7 +115,15 @@ void app_main(void)
     io_conf.pull_down_en = GPIO_PULLDOWN_ENABLE;
     gpio_config(&io_conf);
 
+	ESP_LOGI("app_main", "setting up nvs flash");
+	init_nvs_flash();
 
+	ESP_LOGI("app_main", "calling wifi_init_sta");	
+	wifi_init_sta();
+
+
+
+	ESP_LOGI("app_main", "setting up screen...");
 
 	SSD1306_t dev;
 	int center, top, bottom;
@@ -119,12 +139,6 @@ void app_main(void)
 	ssd1306_init(&dev, 128, 64);
 
 	ssd1306_clear_screen(&dev, false);
-	//ssd1306_contrast(&dev, 0xff);
-  	//ssd1306_display_text_x3(&dev, 1, "IT'S", 5, true);
-  	//ssd1306_display_text_x3(&dev, 4, " COLD", 5, true);
-
-//	display_str_x2(&dev, 16, "ABC", 3, false);
-//	while(true);
 
 	day_t days[5] = {
 		{
@@ -155,11 +169,9 @@ void app_main(void)
 	};
 	int i = 0;
 	while(true) {
-		render_menu(&dev, &days[i++ % 5]);
-		while(!getButton());
-		while(getButton());
-		while(!getButton());
-		while(getButton());
+		render_forcast_menu(&dev, &days[i++ % 5]);
+		while(!getButton()) vTaskDelay(1);
+		while(getButton())  vTaskDelay(1);
 	}
 
 	while(true) vTaskDelay(30000 / portTICK_PERIOD_MS);
