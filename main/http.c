@@ -26,29 +26,36 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 // an absolutely absurd buffer size 
 #define MAX_HTTP_OUTPUT_BUFFER (64 * 1024)
 
+#include <time.h>
+
+
 char *local_response_buffer; 
 
 void init_http() {
 	local_response_buffer = malloc(MAX_HTTP_OUTPUT_BUFFER);
 }
 
+
+typedef struct {
+	int day_of_week; // this is the day of the week
+	int hour; // 15 -> 15:00 -> 3pm local time
+	double feels_like, temp_min, temp_max, temp; // farenhite
+	double percipitation_probability; // 0..1
+	double cloudyness; // I've seen 2. is a %. out of 100? not sure
+	double rain_volume; // mm
+	double snow_volume; // mm
+} forcast_data;
+
+
 void get_forcast_temp() {
-    /**
-     * NOTE: All the configuration parameters for http_client must be spefied either in URL or as host and path parameters.
-     * If host and path parameters are not set, query parameter will be ignored. In such cases,
-     * query parameter should be specified in URL.
-     *
-     * If URL as well as host and path parameters are specified, values of host and path will be considered.
-     */
     esp_http_client_config_t config = {
 		.url = API_INCLU_PASS,
         .event_handler = _http_event_handler,
-        .user_data = local_response_buffer, // Pass address of local buffer to get response
+        .user_data = local_response_buffer,
         .disable_auto_redirect = true,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
 	ESP_LOGI(TAG, "INITTED HTTP ALLEGEDLY");
-    // GET
     esp_err_t err = esp_http_client_perform(client);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %lld",
@@ -56,10 +63,12 @@ void get_forcast_temp() {
                 esp_http_client_get_content_length(client));
     } else {
         ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(err));
+		return;
     }
- //   ESP_LOG_BUFFER_HEX(TAG, local_response_buffer, strlen(local_response_buffer));
-	//ESP_LOGI(TAG, "%s", local_response_buffer);
-
+	if(esp_http_client_get_status_code(client) != 200) {
+		ESP_LOGE(TAG, "HTTP REQ FAILED: %d", esp_http_client_get_status_code(client));
+		return;
+	}
 
 
 	cJSON *json = cJSON_Parse(local_response_buffer);
@@ -68,15 +77,51 @@ void get_forcast_temp() {
 		return;
 	}
 	json = json->child;
-	while(strcmp(json->string, "cnt") != 0) {
+	while(strcmp(json->string, "list") != 0) {
 		json = json->next;
+		if(json == NULL) {
+			ESP_LOGE(TAG, "reached end of object while looking for dt");
+			return;
+		}
 	}
-	if(json->type != cJSON_Number) {
-		ESP_LOGE(TAG, "was expecting int at root['cnt']");
+	if(json->type != cJSON_Array) {
+		ESP_LOGE(TAG, "was expecting array at root['list']");
 		return;
 	}
-	int cnt = json->valueint;
-	ESP_LOGI("======", "GOT CNT: %d", cnt);
+	json = json->child; // the first element
+	if(json->type != cJSON_Object) {
+		ESP_LOGE(TAG, "was expecting an object at root['list'][0]");
+		return;
+	}
+
+	forcast_data data[40] = { 0 };
+
+	setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
+	tzset();
+	// but we'll just use the first element for now
+	for(int i = 0; i < 40; i++) {
+
+		cJSON *obj = json->child; // this is the first field of the inner obj
+		// extract the dt
+		while(strcmp(obj->string, "dt") != 0) {
+			obj = obj->next;
+			if(obj == NULL) {
+				ESP_LOGE(TAG, "reached end of object while looking for dt");
+				return;
+			}
+		}
+		if(obj->type != cJSON_Number) {
+			ESP_LOGE(TAG, "was expecting an object at root['list'][0]['dt']");
+			return;
+		}
+
+
+		time_t dt = (time_t)(obj->valuedouble);
+		struct tm * const time = localtime(&dt);
+		//data[i].hour = x;
+		ESP_LOGI("======", "GOT DT_0: %s", asctime(time));
+		json = json->next;
+	}
 	
 }
 
