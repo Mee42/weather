@@ -32,8 +32,6 @@
 #include "freertos/task.h"
 #include "esp_log.h"
 
-#include "ssd1306.h"
-#include "font8x8_basic.h"
 
 
 #define TAG "main.c"
@@ -54,7 +52,7 @@ void init_nvs_flash() {
     ESP_ERROR_CHECK(ret);
 }
 
-day_t days[5];
+day_t days[7];
 
 void app_main(void)
 {
@@ -78,13 +76,35 @@ void app_main(void)
 	ESP_LOGI(TAG, "setting up http");
 	init_http();	
 	
-	ESP_LOGI(TAG, "CALLING HTTP FUNCTION");
-	get_forcast_temp();
+	ESP_LOGI(TAG, "making api call");
+	make_api_call();
+	
+	ESP_LOGI(TAG, "parsing forcast data");
+	parse_forcast_data();
+	
+	ESP_LOGI(TAG, "processing data");
+	int current_day = process_data(days);
 
-	int i = 0;
+
+	int i = current_day;
 	while(true) {
-		render_forcast_menu(&days[i++ % 5]);
-		vTaskDelay(1000 / portTICK_PERIOD_MS);
+		while(days[i %= 7].high == 99) { i++; } // find next day
+		render_forcast_menu(&days[i++]);
+		// we wait for the button to be unpressed before waiting for it to be pressed
+		while(getButton()) { vTaskDelay(1); }; 
+		int64_t press_time = esp_timer_get_time();
+		int spinlock = 0;
+		while(!getButton()) {
+			vTaskDelay(10 / portTICK_PERIOD_MS);
+			if(spinlock++ == 100) {
+				spinlock = 0;
+				int64_t now_time = esp_timer_get_time();
+				if((now_time - press_time) / 1000 / 1000 > 30) {
+					i = current_day;
+					break;
+				}
+			}
+		}
 	}
 
 	ESP_LOGI("==================", "Reached the end of program execution. Halting");
@@ -94,30 +114,3 @@ void app_main(void)
 
 
 
-day_t days[5] = {
-	{
-		.day = { 'T', 'u' },
-		.high = 35,
-		.low = 22
-	},
-	{
-		.day = {'W', 'e'},
-		.high = 58,
-		.low = 34
-	},
-	{
-		.day = { 'T', 'h' },
-		.high = 92,
-		.low = 4
-	},
-	{
-		.day = {'F', 'r'},
-		.high = 13,
-		.low = -4
-	},
-	{
-		.day = {'S', 'a'},
-		.high = 99,
-		.low = 77
-	},
-};

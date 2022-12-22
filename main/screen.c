@@ -45,15 +45,21 @@ void render_forcast_menu(day_t *info) {
 
 	display_str_x3(0, 1, info->day, 2, true);
 
-	char buf[5];
+	char buf[15];
 	sprintf(buf, "L:%2d", info->low);
 	display_str_x2(7 * 8, 0, buf, strlen(buf), false); 
 	sprintf(buf, "H:%2d", info->high);
 	display_str_x2(7 * 8, 2, buf, strlen(buf), false); 
 
-	display_str_x2(0, 4, "01234567", 8, false);
-	display_str_x2(0, 6, "01234567", 8, false);
-
+	for(int w = 0; w <= 1; w++) {
+		weather_t weather = info->weather[w];
+		sprintf(buf, "        ");
+		if(weather.start != -99) {
+			sprintf(buf, "%s: %d-%d", (info->weather[w].is_snow ? "S" : "R"),
+					info->weather[w].start, info->weather[w].end);
+		}
+		display_str_x2(0, 4 + w * 2, buf, 8, false);
+	}
 	current_mode = SS_FORCAST;
 }
 //    ----------------

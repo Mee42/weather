@@ -20,7 +20,6 @@
 
 #include "../secrets.h"
 
-esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 
 #define MAX_HTTP_RECV_BUFFER 512
 // an absolutely absurd buffer size 
@@ -28,26 +27,22 @@ esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 
 #include <time.h>
 
+// private functions
+cJSON* find_field(cJSON* first_child, char* name, bool warnOnMissing);
+esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 
+
+// where the api text gets put
 char *local_response_buffer; 
+// where we store the api data
+forcast_data data_buf[40];
 
 void init_http() {
 	local_response_buffer = malloc(MAX_HTTP_OUTPUT_BUFFER);
 }
 
 
-typedef struct {
-	int day_of_week; // this is the day of the week
-	int hour; // 15 -> 15:00 -> 3pm local time
-	double feels_like, temp_min, temp_max, temp; // farenhite
-	double percipitation_probability; // 0..1
-	double cloudyness; // I've seen 2. is a %. out of 100? not sure
-	double rain_volume; // mm
-	double snow_volume; // mm
-} forcast_data;
-
-
-void get_forcast_temp() {
+void make_api_call() {
     esp_http_client_config_t config = {
 		.url = API_INCLU_PASS,
         .event_handler = _http_event_handler,
@@ -69,9 +64,14 @@ void get_forcast_temp() {
 		ESP_LOGE(TAG, "HTTP REQ FAILED: %d", esp_http_client_get_status_code(client));
 		return;
 	}
+}
 
-
+void parse_forcast_data() {
 	cJSON *json = cJSON_Parse(local_response_buffer);
+	if(json == NULL) {
+		ESP_LOGE(TAG, "json is null");
+		return;
+	}
 	if(json->type != cJSON_Object) {
 		ESP_LOGE(TAG, "was expecting object at top level");
 		return;
@@ -94,7 +94,6 @@ void get_forcast_temp() {
 		return;
 	}
 
-	//forcast_data data[40] = { 0 };
 
 	setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
 	tzset();
@@ -103,27 +102,194 @@ void get_forcast_temp() {
 
 		cJSON *obj = json->child; // this is the first field of the inner obj
 		// extract the dt
-		while(strcmp(obj->string, "dt") != 0) {
-			obj = obj->next;
-			if(obj == NULL) {
-				ESP_LOGE(TAG, "reached end of object while looking for dt");
-				return;
-			}
-		}
-		if(obj->type != cJSON_Number) {
-			ESP_LOGE(TAG, "was expecting an object at root['list'][0]['dt']");
+		cJSON *dt = find_field(obj, "dt", true);
+		if(dt == NULL) return;
+		if(dt->type != cJSON_Number) {
+			ESP_LOGE(TAG, "was expecting a number at root['list'][i]['dt']");
 			return;
 		}
 	
-		time_t dt = (time_t)(obj->valuedouble);
-		ESP_LOGI("=====", "time_t dt: %d", (double)dt);
-		struct tm * const time = localtime(&dt);
-		//data[i].hour = x;
-		ESP_LOGI("======", "GOT DT_0: %s", asctime(time));
+		time_t dt_time_t = (time_t)(dt->valuedouble);
+		struct tm * const time = localtime(&dt_time_t);
+		data_buf[i].hour = time->tm_hour;
+		data_buf[i].day_of_week = time->tm_wday;
+		
+		cJSON *main = find_field(obj, "main", true);
+		if(main == NULL) return;
+		if(main->type != cJSON_Object) {
+			ESP_LOGE(TAG, "was expecting an object at root['list'][i]['main']");
+			return;
+		}
+		main = main->child; // first field
+		cJSON *temp_min 	= find_field(main, "temp_min", true);
+		cJSON *temp_max 	= find_field(main, "temp_max", true);
+		cJSON *temp 		= find_field(main, "temp", true);
+		cJSON *feels_like 	= find_field(main, "feels_like", true);
+		if(temp_min == NULL || temp_max == NULL || 
+		   temp == NULL     || feels_like == NULL) {
+			return;
+		}
+		// we're just ging to assume they are the right type lol
+		data_buf[i].temp 	 = temp->valuedouble;
+		data_buf[i].temp_max = temp_max->valuedouble;
+		data_buf[i].temp_min = temp_min->valuedouble;
+		data_buf[i].feels_like = feels_like->valuedouble;
+
+		cJSON *pop = find_field(obj, "pop", true);
+		if(pop == NULL) return;
+		data_buf[i].percipitation_probability = pop->valuedouble;
+
+		cJSON *cloudyness = find_field(find_field(obj, "clouds", true)->child,
+								       "all", true);
+		if(cloudyness == NULL) return;
+		data_buf[i].cloudyness = cloudyness->valueint;
+
+
+		cJSON *rain = find_field(obj, "rain", false);
+		if(rain != NULL) {
+			rain = find_field(rain->child, "3h", true);
+			if(rain == NULL) return;
+			data_buf[i].rain_volume = rain->valuedouble;
+		} else {
+			data_buf[i].rain_volume = 0;
+		}
+
+
+		cJSON *snow = find_field(obj, "snow", false);
+		if(snow != NULL) {
+			snow = find_field(snow->child, "3h", true);
+			if(snow == NULL) return;
+			data_buf[i].snow_volume = snow->valuedouble;
+		} else {
+			data_buf[i].snow_volume = 0;
+		}
+
+
+		// go to the next element
 		json = json->next;
+
 	}
-	
+	for(int i = 0; i < 40; i++) {
+		forcast_data f = data_buf[i];
+		ESP_LOGI(TAG, "looking at record at %d (%d:00)\n"
+				"feels_like: %f. temp_min: %f. temp_max: %f. temp: %f\n"
+				"percip: %f. cloudyness: %d. rain vol: %f. snow vol: %f", 
+				f.day_of_week, f.hour,
+				f.feels_like, f.temp_min, f.temp_max, f.temp,
+				f.percipitation_probability, f.cloudyness,
+				f.rain_volume, f.snow_volume);
+	}	
 }
+
+cJSON* find_field(cJSON* first_child, char* name, bool warnOnMissing) {
+	if(first_child == NULL) return NULL;
+	cJSON* obj = first_child;	
+	while(strcmp(obj->string, name) != 0) {
+		obj = obj->next;
+		if(obj == NULL) {
+			if(warnOnMissing) {
+				ESP_LOGE(TAG, "reached end of object while looking for %s", name);
+			}
+			return NULL;
+		}
+	}
+	return obj;
+}
+
+int max(int a, int b) { return a > b ? a : b; }
+int min(int a, int b) { return b > a ? a : b; }
+
+// just all of the days in order lol
+char *day_lookup = "Su" "Mo" "Tu" "We" "Th" "Fr" "Sa";
+
+// ret must be an array with 7 elements
+int process_data(day_t *ret) {
+	for(int i = 0; i <= 6; i++) {
+		day_t v = {
+			.day = { day_lookup[i * 2], day_lookup[i * 2 + 1] },
+			.low = 99,
+			.high = -9,
+			.weather = {
+				{ .start = -99, .end = -99, .is_snow = false },
+				{ .start = -99, .end = -99, .is_snow = false }
+			}
+		};
+		ret[i] = v;
+	}
+	for(int i = 0; i < 40; i++) {
+		forcast_data f = data_buf[i];
+		day_t *ptr = ret + f.day_of_week;
+		ptr->high = max(ptr->high, f.temp_max);
+		ptr->low = min(ptr->low, f.temp_min);
+		
+		if(f.rain_volume != 0) {
+			// find a spot we can put the weather data lol
+			for(int w = 0; w < 2; w++) {
+				weather_t *weather = &ptr->weather[w];
+				if(weather->start == -99) {
+					ESP_LOGI(TAG, "(w = %d) making new weather %d %d-%d",
+							w, f.day_of_week,
+							max(f.hour - 3, 0), f.hour);
+					weather->end = f.hour;
+					weather->start = max(f.hour - 3, 0); // zero is bottom
+					weather->is_snow = false;
+					break;
+				}
+				// if it's already been claimed, check to make sure it isn't for snow
+				if(weather->is_snow) break;
+				// if we are after the current recorded segment
+				if(weather->end == f.hour - 3) {
+					weather->end = f.hour;
+					ESP_LOGI(TAG, "(w = %d) prepending weather %d %d-%d",
+							w, f.day_of_week,
+							max(f.hour - 3, 0), f.hour);
+					break;
+				}
+				if(weather->start == f.hour) {
+					ESP_LOGI(TAG, "(w = %d) appending weather %d %d-%d",
+							w, f.day_of_week,
+							max(f.hour - 3, 0), f.hour);
+					weather->start = max(f.hour - 3, 0);
+					break;
+				}
+			}
+		}
+		if(f.snow_volume != 0) {
+			// find a spot we can put the weather data lol
+			for(int w = 0; w < 2; w++) {
+				weather_t *weather = &ptr->weather[w];
+				if(weather->start == -99) {
+					ESP_LOGI(TAG, "(w = %d) making new weather %d %d-%d",
+							w, f.day_of_week,
+							max(f.hour - 3, 0), f.hour);
+					weather->end = f.hour;
+					weather->start = max(f.hour - 3, 0); // zero is bottom
+					weather->is_snow = true;
+					break;
+				}
+				// if it's already been claimed, check to make sure it isn't for rain
+				if(!weather->is_snow) break;
+				// if we are after the current recorded segment
+				if(weather->end == f.hour - 3) {
+					weather->end = f.hour;
+					ESP_LOGI(TAG, "(w = %d) prepending weather %d %d-%d",
+							w, f.day_of_week,
+							max(f.hour - 3, 0), f.hour);
+					break;
+				}
+				if(weather->start == f.hour) {
+					ESP_LOGI(TAG, "(w = %d) appending weather %d %d-%d",
+							w, f.day_of_week,
+							max(f.hour - 3, 0), f.hour);
+					weather->start = max(f.hour - 3, 0);
+					break;
+				}
+			}
+		}
+	}
+	return data_buf[0].day_of_week;
+}
+
 
 
 
