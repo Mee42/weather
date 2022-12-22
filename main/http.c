@@ -94,7 +94,7 @@ void get_forcast_temp() {
 		return;
 	}
 
-	forcast_data data[40] = { 0 };
+	//forcast_data data[40] = { 0 };
 
 	setenv("TZ", "EST5EDT,M3.2.0,M11.1.0", 1);
 	tzset();
@@ -114,9 +114,9 @@ void get_forcast_temp() {
 			ESP_LOGE(TAG, "was expecting an object at root['list'][0]['dt']");
 			return;
 		}
-
-
+	
 		time_t dt = (time_t)(obj->valuedouble);
+		ESP_LOGI("=====", "time_t dt: %d", (double)dt);
 		struct tm * const time = localtime(&dt);
 		//data[i].hour = x;
 		ESP_LOGI("======", "GOT DT_0: %s", asctime(time));
