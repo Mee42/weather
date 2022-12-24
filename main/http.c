@@ -170,6 +170,7 @@ void parse_forcast_data() {
 
 	}
 	for(int i = 0; i < 40; i++) {
+		break; // we don't need to print all of this
 		forcast_data f = data_buf[i];
 		ESP_LOGI(TAG, "looking at record at %d (%d:00)\n"
 				"feels_like: %f. temp_min: %f. temp_max: %f. temp: %f\n"
@@ -204,6 +205,7 @@ char *day_lookup = "Su" "Mo" "Tu" "We" "Th" "Fr" "Sa";
 
 // ret must be an array with 7 elements
 int process_data(day_t *ret) {
+	// zero out all of the existing data
 	for(int i = 0; i <= 6; i++) {
 		day_t v = {
 			.day = { day_lookup[i * 2], day_lookup[i * 2 + 1] },
@@ -227,9 +229,6 @@ int process_data(day_t *ret) {
 			for(int w = 0; w < 2; w++) {
 				weather_t *weather = &ptr->weather[w];
 				if(weather->start == -99) {
-					ESP_LOGI(TAG, "(w = %d) making new weather %d %d-%d",
-							w, f.day_of_week,
-							max(f.hour - 3, 0), f.hour);
 					weather->end = f.hour;
 					weather->start = max(f.hour - 3, 0); // zero is bottom
 					weather->is_snow = false;
@@ -240,15 +239,9 @@ int process_data(day_t *ret) {
 				// if we are after the current recorded segment
 				if(weather->end == f.hour - 3) {
 					weather->end = f.hour;
-					ESP_LOGI(TAG, "(w = %d) prepending weather %d %d-%d",
-							w, f.day_of_week,
-							max(f.hour - 3, 0), f.hour);
 					break;
 				}
 				if(weather->start == f.hour) {
-					ESP_LOGI(TAG, "(w = %d) appending weather %d %d-%d",
-							w, f.day_of_week,
-							max(f.hour - 3, 0), f.hour);
 					weather->start = max(f.hour - 3, 0);
 					break;
 				}
@@ -259,9 +252,6 @@ int process_data(day_t *ret) {
 			for(int w = 0; w < 2; w++) {
 				weather_t *weather = &ptr->weather[w];
 				if(weather->start == -99) {
-					ESP_LOGI(TAG, "(w = %d) making new weather %d %d-%d",
-							w, f.day_of_week,
-							max(f.hour - 3, 0), f.hour);
 					weather->end = f.hour;
 					weather->start = max(f.hour - 3, 0); // zero is bottom
 					weather->is_snow = true;
@@ -272,15 +262,9 @@ int process_data(day_t *ret) {
 				// if we are after the current recorded segment
 				if(weather->end == f.hour - 3) {
 					weather->end = f.hour;
-					ESP_LOGI(TAG, "(w = %d) prepending weather %d %d-%d",
-							w, f.day_of_week,
-							max(f.hour - 3, 0), f.hour);
 					break;
 				}
 				if(weather->start == f.hour) {
-					ESP_LOGI(TAG, "(w = %d) appending weather %d %d-%d",
-							w, f.day_of_week,
-							max(f.hour - 3, 0), f.hour);
 					weather->start = max(f.hour - 3, 0);
 					break;
 				}
