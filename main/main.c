@@ -84,11 +84,13 @@ void app_main(void)
 	
 	ESP_LOGI(TAG, "processing data");
 	int current_day = process_data(days);
-
+	
+	int64_t last_data_refresh_time = esp_timer_get_time();
+	int64_t time_between_updates = 1 /*min*/ * 60 * 1000 * 1000; // in microseconds
 
 	int i = current_day;
 	while(true) {
-		while(days[i %= 7].high == 99) { i++; } // find next day
+		while(days[i %= 7].low == 99) { i++; } // find next day
 		render_forcast_menu(&days[i++]);
 		// we wait for the button to be unpressed before waiting for it to be pressed
 		while(getButton()) { vTaskDelay(1); }; 
@@ -100,6 +102,15 @@ void app_main(void)
 				spinlock = 0;
 				int64_t now_time = esp_timer_get_time();
 				if((now_time - press_time) / 1000 / 1000 > 30) {
+					i = current_day;
+					break;
+				}
+				if(now_time > last_data_refresh_time + time_between_updates) {
+					ESP_LOGI(TAG, "refetching data!");
+					last_data_refresh_time = now_time;
+					make_api_call();
+					parse_forcast_data();
+					process_data(days);
 					i = current_day;
 					break;
 				}

@@ -49,49 +49,58 @@ void make_api_call() {
         .user_data = local_response_buffer,
         .disable_auto_redirect = true,
     };
+	ESP_LOGI(TAG, "initting the client");
     esp_http_client_handle_t client = esp_http_client_init(&config);
-	ESP_LOGI(TAG, "INITTED HTTP ALLEGEDLY");
+	ESP_LOGI(TAG, "Starting HTTP call...");
     esp_err_t err = esp_http_client_perform(client);
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "HTTP GET Status = %d, content_length = %lld",
                 esp_http_client_get_status_code(client),
                 esp_http_client_get_content_length(client));
+		esp_http_client_cleanup(client);
     } else {
         ESP_LOGE(TAG, "HTTP GET request failed: %s", esp_err_to_name(err));
+		esp_http_client_cleanup(client);
 		return;
     }
 	if(esp_http_client_get_status_code(client) != 200) {
 		ESP_LOGE(TAG, "HTTP REQ FAILED: %d", esp_http_client_get_status_code(client));
+		esp_http_client_cleanup(client);
 		return;
 	}
 }
 
 void parse_forcast_data() {
+	if(strlen(local_response_buffer) == 0) {
+		ESP_LOGE(TAG, "local response buffer empty");
+		return;
+	}
 	cJSON *json = cJSON_Parse(local_response_buffer);
+	cJSON *toplevel = json;
 	if(json == NULL) {
 		ESP_LOGE(TAG, "json is null");
 		return;
 	}
 	if(json->type != cJSON_Object) {
 		ESP_LOGE(TAG, "was expecting object at top level");
-		return;
+		goto end;
 	}
 	json = json->child;
 	while(strcmp(json->string, "list") != 0) {
 		json = json->next;
 		if(json == NULL) {
 			ESP_LOGE(TAG, "reached end of object while looking for dt");
-			return;
+			goto end;
 		}
 	}
 	if(json->type != cJSON_Array) {
 		ESP_LOGE(TAG, "was expecting array at root['list']");
-		return;
+		goto end;
 	}
 	json = json->child; // the first element
 	if(json->type != cJSON_Object) {
 		ESP_LOGE(TAG, "was expecting an object at root['list'][0]");
-		return;
+		goto end;
 	}
 
 
@@ -106,7 +115,7 @@ void parse_forcast_data() {
 		if(dt == NULL) return;
 		if(dt->type != cJSON_Number) {
 			ESP_LOGE(TAG, "was expecting a number at root['list'][i]['dt']");
-			return;
+			goto end;
 		}
 	
 		time_t dt_time_t = (time_t)(dt->valuedouble);
@@ -118,7 +127,7 @@ void parse_forcast_data() {
 		if(main == NULL) return;
 		if(main->type != cJSON_Object) {
 			ESP_LOGE(TAG, "was expecting an object at root['list'][i]['main']");
-			return;
+			goto end;
 		}
 		main = main->child; // first field
 		cJSON *temp_min 	= find_field(main, "temp_min", true);
@@ -127,7 +136,7 @@ void parse_forcast_data() {
 		cJSON *feels_like 	= find_field(main, "feels_like", true);
 		if(temp_min == NULL || temp_max == NULL || 
 		   temp == NULL     || feels_like == NULL) {
-			return;
+			goto end;
 		}
 		// we're just ging to assume they are the right type lol
 		data_buf[i].temp 	 = temp->valuedouble;
@@ -136,19 +145,19 @@ void parse_forcast_data() {
 		data_buf[i].feels_like = feels_like->valuedouble;
 
 		cJSON *pop = find_field(obj, "pop", true);
-		if(pop == NULL) return;
+		if(pop == NULL) goto end;
 		data_buf[i].percipitation_probability = pop->valuedouble;
 
 		cJSON *cloudyness = find_field(find_field(obj, "clouds", true)->child,
 								       "all", true);
-		if(cloudyness == NULL) return;
+		if(cloudyness == NULL) goto end;
 		data_buf[i].cloudyness = cloudyness->valueint;
 
 
 		cJSON *rain = find_field(obj, "rain", false);
 		if(rain != NULL) {
 			rain = find_field(rain->child, "3h", true);
-			if(rain == NULL) return;
+			if(rain == NULL) goto end;
 			data_buf[i].rain_volume = rain->valuedouble;
 		} else {
 			data_buf[i].rain_volume = 0;
@@ -158,7 +167,7 @@ void parse_forcast_data() {
 		cJSON *snow = find_field(obj, "snow", false);
 		if(snow != NULL) {
 			snow = find_field(snow->child, "3h", true);
-			if(snow == NULL) return;
+			if(snow == NULL) goto end;
 			data_buf[i].snow_volume = snow->valuedouble;
 		} else {
 			data_buf[i].snow_volume = 0;
@@ -180,6 +189,9 @@ void parse_forcast_data() {
 				f.percipitation_probability, f.cloudyness,
 				f.rain_volume, f.snow_volume);
 	}	
+end:
+	cJSON_Delete(toplevel);
+	return;
 }
 
 cJSON* find_field(cJSON* first_child, char* name, bool warnOnMissing) {
@@ -203,6 +215,34 @@ int min(int a, int b) { return b > a ? a : b; }
 // just all of the days in order lol
 char *day_lookup = "Su" "Mo" "Tu" "We" "Th" "Fr" "Sa";
 
+void insert_incliminate_weather(day_t *day, int hour, bool is_snow) {
+
+	for(int w = 0; w < 2; w++) {
+		weather_t *weather = &day->weather[w];
+		// if we find a blank spot, take it
+		if(weather->start == -99) {
+			weather->end = hour;
+			weather->start = max(hour - 3, 0); // zero is bottom
+			weather->is_snow = is_snow;
+			break;
+		}
+		// *weather is already taken now
+		// if it's not the right type of weather
+		if(weather->is_snow != is_snow) continue;
+
+		// if we are after the current recorded segment, add ourself in
+		if(weather->end == hour - 3) {
+			weather->end = hour;
+			break;
+		}
+
+		if(weather->start == hour) {
+			weather->start = max(hour - 3, 0);
+			break;
+		}
+	}
+}
+
 // ret must be an array with 7 elements
 int process_data(day_t *ret) {
 	// zero out all of the existing data
@@ -214,7 +254,9 @@ int process_data(day_t *ret) {
 			.weather = {
 				{ .start = -99, .end = -99, .is_snow = false },
 				{ .start = -99, .end = -99, .is_snow = false }
-			}
+			},
+			.total_snow = 0,
+			.total_rain = 0,
 		};
 		ret[i] = v;
 	}
@@ -225,51 +267,14 @@ int process_data(day_t *ret) {
 		ptr->low = min(ptr->low, f.temp_min);
 		
 		if(f.rain_volume != 0) {
-			// find a spot we can put the weather data lol
-			for(int w = 0; w < 2; w++) {
-				weather_t *weather = &ptr->weather[w];
-				if(weather->start == -99) {
-					weather->end = f.hour;
-					weather->start = max(f.hour - 3, 0); // zero is bottom
-					weather->is_snow = false;
-					break;
-				}
-				// if it's already been claimed, check to make sure it isn't for snow
-				if(weather->is_snow) break;
-				// if we are after the current recorded segment
-				if(weather->end == f.hour - 3) {
-					weather->end = f.hour;
-					break;
-				}
-				if(weather->start == f.hour) {
-					weather->start = max(f.hour - 3, 0);
-					break;
-				}
-			}
+			insert_incliminate_weather(ptr,f.hour, false);
 		}
 		if(f.snow_volume != 0) {
-			// find a spot we can put the weather data lol
-			for(int w = 0; w < 2; w++) {
-				weather_t *weather = &ptr->weather[w];
-				if(weather->start == -99) {
-					weather->end = f.hour;
-					weather->start = max(f.hour - 3, 0); // zero is bottom
-					weather->is_snow = true;
-					break;
-				}
-				// if it's already been claimed, check to make sure it isn't for rain
-				if(!weather->is_snow) break;
-				// if we are after the current recorded segment
-				if(weather->end == f.hour - 3) {
-					weather->end = f.hour;
-					break;
-				}
-				if(weather->start == f.hour) {
-					weather->start = max(f.hour - 3, 0);
-					break;
-				}
-			}
+			insert_incliminate_weather(ptr,f.hour, true);
 		}
+		ptr->total_snow += f.snow_volume;
+		ptr->total_rain += f.rain_volume;
+
 	}
 	return data_buf[0].day_of_week;
 }

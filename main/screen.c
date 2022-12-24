@@ -10,7 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define tag "screen.c"
+#define TAG "screen.c"
 
 // private functions
 
@@ -30,6 +30,7 @@ SSD1306_t dev;
 
 screenstate_t current_mode;
 
+double mm_to_in(double mm) { return mm * 0.0393701; }
 
 void render_forcast_menu(day_t *info) {
 	ESP_LOGI("render_forcast_menu", "rendering forcast menu");
@@ -45,18 +46,22 @@ void render_forcast_menu(day_t *info) {
 
 	display_str_x3(0, 1, info->day, 2, true);
 
-	char buf[15];
+	char buf[25];
 	sprintf(buf, "L:%2d", info->low);
 	display_str_x2(7 * 8, 0, buf, strlen(buf), false); 
 	sprintf(buf, "H:%2d", info->high);
 	display_str_x2(7 * 8, 2, buf, strlen(buf), false); 
 
-	for(int w = 0; w <= 1; w++) {
+	for(int w = 0; w < 2; w++) {
 		weather_t weather = info->weather[w];
 		sprintf(buf, "        ");
 		if(weather.start != -99) {
-			sprintf(buf, "%s: %d-%d", (info->weather[w].is_snow ? "S" : "R"),
-					info->weather[w].start, info->weather[w].end);
+			sprintf(buf, "%s: %d-%d", (weather.is_snow ? "S" : "R"), weather.start, weather.end);
+		} else if (w == 1 && info->weather[0].start != -99) {
+			// we know w == 1 here, and that weather[0] is a real thing
+			// display the volume of the first entry
+			double vol = info->weather[0].is_snow ? info->total_snow : info->total_rain;   
+			sprintf(buf, "v: %.2f   ", mm_to_in(vol));
 		}
 		display_str_x2(0, 4 + w * 2, buf, 8, false);
 	}
@@ -122,10 +127,10 @@ void display_str_x3(int seg, int page,
 
 
 void init_screen(void) {
-	ESP_LOGI(tag, "starting i2c");
+	ESP_LOGI(TAG, "starting i2c");
 	i2c_master_init(&dev, CONFIG_SDA_GPIO, CONFIG_SCL_GPIO, CONFIG_RESET_GPIO);
 
-	ESP_LOGI(tag, "Panel is 128x64");
+	ESP_LOGI(TAG, "Panel is 128x64");
 	ssd1306_init(&dev, 128, 64);
 
 	ssd1306_clear_screen(&dev, true);
@@ -156,6 +161,8 @@ void init_screen(void) {
 
 // this is only for reference
 void other_shit() {
+	ESP_LOGE(TAG, "never call this shit");
+	return;
 	int center, top, bottom;
 	char lineChar[20];
 	int i = 0;

@@ -13,6 +13,8 @@ typedef struct {
 	int high;
 	int low;
 	weather_t weather[2];
+	double total_snow;
+	double total_rain;
 } day_t;
 
 typedef enum {
